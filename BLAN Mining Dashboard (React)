@@ -1,18 +1,4 @@
-const loadData = async () => {
-    if (!account) return;
-    
-    try {
-      setLoading(true);
-      
-      // Load balance - simplified call
-      const balHex = await window.ethereum.request({
-        method: 'eth_call',
-        params: [{
-          to: CONTRACT_ADDRESS,
-          data: '0x70a08231' + account.slice(2).padStart(64, '0')
-        }, 'latest']
-      });
-      const balWei = BigInt(balHex);import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertCircle, TrendingUp, Clock, Coins, Award } from 'lucide-react';
 
 const CONTRACT_ADDRESS = "0x8d75935f78fcd5e0fbf532be84d0089dc7f1a6c2"; // Replace with actual
@@ -264,63 +250,77 @@ export default function BLANMiningDashboard() {
   };
 
   const loadData = async () => {
+    if (!account) return;
+    
     try {
       setLoading(true);
       
-      // Load balance
-      const bal = await contract.balanceOf(account);
-      setBalance(ethers.formatEther(bal));
+      // Load balance - simplified call
+      const balHex = await window.ethereum.request({
+        method: 'eth_call',
+        params: [{
+          to: CONTRACT_ADDRESS,
+          data: '0x70a08231' + account.slice(2).padStart(64, '0')
+        }, 'latest']
+      });
+      const balWei = BigInt(balHex);
+      setBalance(formatEther(balWei));
       
-      // Load sessions
-      const userSessions = await contract.getUserSessions(account);
-      setSessions(userSessions);
+      // Load difficulty
+      const diffHex = await window.ethereum.request({
+        method: 'eth_call',
+        params: [{
+          to: CONTRACT_ADDRESS,
+          data: '0x1bc09d0a'
+        }, 'latest']
+      });
+      setDifficulty(formatEther(BigInt(diffHex)));
       
-      // Load tiers
-      const tierData = [];
-      for (let i = 0; i < 3; i++) {
-        const tier = await contract.getTierInfo(i);
-        tierData.push({
-          id: i,
-          duration: Number(tier.duration),
-          multiplier: Number(tier.rewardMultiplier),
-          minStake: ethers.formatEther(tier.minStake),
-          active: tier.active
-        });
-      }
-      setTiers(tierData);
+      // Load total rewards
+      const rewardsHex = await window.ethereum.request({
+        method: 'eth_call',
+        params: [{
+          to: CONTRACT_ADDRESS,
+          data: '0xa7bb5803'
+        }, 'latest']
+      });
+      setTotalRewards(formatEther(BigInt(rewardsHex)));
       
-      // Load difficulty and rewards
-      const diff = await contract.miningDifficulty();
-      setDifficulty(ethers.formatEther(diff));
+      // Initialize tier data (static for now)
+      setTiers([
+        {
+          id: 0,
+          duration: 7 * 24 * 60 * 60,
+          multiplier: 12000,
+          minStake: '100',
+          active: true
+        },
+        {
+          id: 1,
+          duration: 30 * 24 * 60 * 60,
+          multiplier: 15000,
+          minStake: '500',
+          active: true
+        },
+        {
+          id: 2,
+          duration: 90 * 24 * 60 * 60,
+          multiplier: 20000,
+          minStake: '1000',
+          active: true
+        }
+      ]);
       
-      const rewards = await contract.getTotalMiningRewards();
-      setTotalRewards(ethers.formatEther(rewards));
+      // Note: getUserSessions would need proper ABI decoding
+      // For demo, setting empty array
+      setSessions([]);
       
       setLoading(false);
     } catch (err) {
+      console.error('Load data error:', err);
       setError('Failed to load data: ' + err.message);
       setLoading(false);
     }
-  };
-
-  const setupEventListeners = () => {
-    contract.on("MiningStarted", (user, sessionId, amount, tier) => {
-      if (user.toLowerCase() === account.toLowerCase()) {
-        loadData();
-      }
-    });
-    
-    contract.on("MiningCompleted", (user, sessionId, amount) => {
-      if (user.toLowerCase() === account.toLowerCase()) {
-        loadData();
-      }
-    });
-    
-    contract.on("RewardClaimed", (user, sessionId, reward) => {
-      if (user.toLowerCase() === account.toLowerCase()) {
-        loadData();
-      }
-    });
   };
 
   const startMining = async () => {
@@ -333,14 +333,36 @@ export default function BLANMiningDashboard() {
       setLoading(true);
       setError('');
       
-      const amount = ethers.parseEther(stakeAmount);
+      const amount = parseEther(stakeAmount);
       
-      // Approve first (if needed)
-      const approveTx = await contract.approve(CONTRACT_ADDRESS, amount);
-      await approveTx.wait();
+      // Approve tokens first
+      const approveTxHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: account,
+          to: CONTRACT_ADDRESS,
+          data: '0x095ea7b3' + 
+                CONTRACT_ADDRESS.slice(2).padStart(64, '0') +
+                amount.toString(16).padStart(64, '0')
+        }]
+      });
       
-      const tx = await contract.startMining(amount, selectedTier);
-      await tx.wait();
+      await waitForTransaction(approveTxHash);
+      
+      // Start mining
+      const amountHex = amount.toString(16).padStart(64, '0');
+      const tierHex = selectedTier.toString(16).padStart(64, '0');
+      
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: account,
+          to: CONTRACT_ADDRESS,
+          data: '0xa694fc3a' + amountHex + tierHex
+        }]
+      });
+      
+      await waitForTransaction(txHash);
       
       setStakeAmount('');
       await loadData();
@@ -356,9 +378,18 @@ export default function BLANMiningDashboard() {
       setLoading(true);
       setError('');
       
-      const tx = await contract.completeMining(sessionId);
-      await tx.wait();
+      const sessionIdHex = sessionId.toString(16).padStart(64, '0');
       
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: account,
+          to: CONTRACT_ADDRESS,
+          data: '0x7c025200' + sessionIdHex
+        }]
+      });
+      
+      await waitForTransaction(txHash);
       await loadData();
       setLoading(false);
     } catch (err) {
@@ -372,9 +403,18 @@ export default function BLANMiningDashboard() {
       setLoading(true);
       setError('');
       
-      const tx = await contract.claimMiningReward(sessionId);
-      await tx.wait();
+      const sessionIdHex = sessionId.toString(16).padStart(64, '0');
       
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: account,
+          to: CONTRACT_ADDRESS,
+          data: '0x6c19e783' + sessionIdHex
+        }]
+      });
+      
+      await waitForTransaction(txHash);
       await loadData();
       setLoading(false);
     } catch (err) {
@@ -390,9 +430,18 @@ export default function BLANMiningDashboard() {
       setLoading(true);
       setError('');
       
-      const tx = await contract.withdrawEarly(sessionId);
-      await tx.wait();
+      const sessionIdHex = sessionId.toString(16).padStart(64, '0');
       
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: account,
+          to: CONTRACT_ADDRESS,
+          data: '0x' + getMethodSelector('withdrawEarly', [{type: 'uint256'}]) + sessionIdHex
+        }]
+      });
+      
+      await waitForTransaction(txHash);
       await loadData();
       setLoading(false);
     } catch (err) {
@@ -425,6 +474,26 @@ export default function BLANMiningDashboard() {
     const names = ['Short-term', 'Medium-term', 'Long-term'];
     return names[tier] || 'Unknown';
   };
+
+  if (!account) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          <Coins className="w-16 h-16 text-indigo-600 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Connect Your Wallet</h2>
+          <p className="text-gray-600 mb-6">
+            Connect your wallet to start mining BLAN tokens
+          </p>
+          <button
+            onClick={initWeb3}
+            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all"
+          >
+            Connect MetaMask
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -593,7 +662,7 @@ export default function BLANMiningDashboard() {
                           <div>
                             <div className="text-gray-600">Staked</div>
                             <div className="font-semibold text-gray-800">
-                              {ethers.formatEther(session.amount)} BLAN
+                              {formatEther(session.amount)} BLAN
                             </div>
                           </div>
                           <div>
@@ -619,7 +688,7 @@ export default function BLANMiningDashboard() {
                         {Number(session.rewardClaimed) > 0 && (
                           <div className="mb-4 p-3 bg-green-50 rounded-lg">
                             <div className="text-sm text-green-700">
-                              Reward Claimed: {ethers.formatEther(session.rewardClaimed)} BLAN
+                              Reward Claimed: {formatEther(session.rewardClaimed)} BLAN
                             </div>
                           </div>
                         )}
