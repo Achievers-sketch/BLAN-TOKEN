@@ -1,0 +1,675 @@
+const loadData = async () => {
+    if (!account) return;
+    
+    try {
+      setLoading(true);
+      
+      // Load balance - simplified call
+      const balHex = await window.ethereum.request({
+        method: 'eth_call',
+        params: [{
+          to: CONTRACT_ADDRESS,
+          data: '0x70a08231' + account.slice(2).padStart(64, '0')
+        }, 'latest']
+      });
+      const balWei = BigInt(balHex);import React, { useState, useEffect } from 'react';
+import { AlertCircle, TrendingUp, Clock, Coins, Award } from 'lucide-react';
+
+const CONTRACT_ADDRESS = "0x8d75935f78fcd5e0fbf532be84d0089dc7f1a6c2"; // Replace with actual
+
+// ABI for the BLAN Token contract
+const BLAN_TOKEN_ABI = [
+  {
+    "inputs": [{"type": "address"}],
+    "name": "balanceOf",
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "uint256"}, {"type": "uint8"}],
+    "name": "startMining",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "uint256"}],
+    "name": "completeMining",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "uint256"}],
+    "name": "claimMiningReward",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "uint256"}],
+    "name": "withdrawEarly",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "address"}],
+    "name": "getUserSessions",
+    "outputs": [{"type": "tuple[]", "components": [
+      {"name": "amount", "type": "uint256"},
+      {"name": "startTime", "type": "uint256"},
+      {"name": "endTime", "type": "uint256"},
+      {"name": "rewardClaimed", "type": "uint256"},
+      {"name": "active", "type": "bool"},
+      {"name": "tier", "type": "uint8"}
+    ]}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "uint8"}],
+    "name": "getTierInfo",
+    "outputs": [{"type": "tuple", "components": [
+      {"name": "duration", "type": "uint256"},
+      {"name": "rewardMultiplier", "type": "uint256"},
+      {"name": "minStake", "type": "uint256"},
+      {"name": "active", "type": "bool"}
+    ]}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "miningDifficulty",
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getTotalMiningRewards",
+    "outputs": [{"type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"type": "address"}, {"type": "uint256"}],
+    "name": "approve",
+    "outputs": [{"type": "bool"}],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+];
+
+// Helper functions for BigInt handling
+const formatEther = (wei) => {
+  if (!wei) return "0";
+  const weiStr = wei.toString();
+  const ethValue = weiStr.length > 18 
+    ? weiStr.slice(0, -18) + '.' + weiStr.slice(-18, -14)
+    : '0.' + '0'.repeat(18 - weiStr.length) + weiStr;
+  return parseFloat(ethValue).toFixed(4);
+};
+
+const parseEther = (ether) => {
+  const etherStr = ether.toString();
+  const [whole, decimal = ''] = etherStr.split('.');
+  const paddedDecimal = (decimal + '0'.repeat(18)).slice(0, 18);
+  return BigInt(whole + paddedDecimal);
+};
+
+export default function BLANMiningDashboard() {
+  const [provider, setProvider] = useState(null);
+  const [account, setAccount] = useState('');
+  const [balance, setBalance] = useState('0');
+  const [sessions, setSessions] = useState([]);
+  const [tiers, setTiers] = useState([]);
+  const [difficulty, setDifficulty] = useState('0');
+  const [totalRewards, setTotalRewards] = useState('0');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  // Mining form
+  const [stakeAmount, setStakeAmount] = useState('');
+  const [selectedTier, setSelectedTier] = useState(0);
+
+  useEffect(() => {
+    initWeb3();
+  }, []);
+
+  useEffect(() => {
+    if (account) {
+      loadData();
+    }
+  }, [account]);
+
+  const initWeb3 = async () => {
+    try {
+      if (typeof window.ethereum !== 'undefined') {
+        // Request account access
+        const accounts = await window.ethereum.request({ 
+          method: 'eth_requestAccounts' 
+        });
+        
+        setAccount(accounts[0]);
+        
+        // Listen for account changes
+        window.ethereum.on('accountsChanged', (accounts) => {
+          setAccount(accounts[0] || '');
+          if (accounts[0]) loadData();
+        });
+        
+        // Listen for chain changes
+        window.ethereum.on('chainChanged', () => {
+          window.location.reload();
+        });
+      } else {
+        setError('Please install MetaMask');
+      }
+    } catch (err) {
+      setError('Failed to connect wallet: ' + err.message);
+    }
+  };
+
+  const callContract = async (method, params = []) => {
+    try {
+      const response = await window.ethereum.request({
+        method: 'eth_call',
+        params: [{
+          to: CONTRACT_ADDRESS,
+          data: encodeFunction(method, params)
+        }, 'latest']
+      });
+      return response;
+    } catch (err) {
+      throw new Error('Contract call failed: ' + err.message);
+    }
+  };
+
+  const sendTransaction = async (method, params = []) => {
+    try {
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: account,
+          to: CONTRACT_ADDRESS,
+          data: encodeFunction(method, params)
+        }]
+      });
+      
+      // Wait for transaction confirmation
+      await waitForTransaction(txHash);
+      return txHash;
+    } catch (err) {
+      throw new Error('Transaction failed: ' + err.message);
+    }
+  };
+
+  const encodeFunction = (method, params) => {
+    const func = BLAN_TOKEN_ABI.find(f => f.name === method);
+    if (!func) throw new Error('Method not found in ABI');
+    
+    // Simple function selector (first 4 bytes of keccak256)
+    const selector = getMethodSelector(method, func.inputs);
+    
+    // Encode parameters (simplified - real implementation would need proper encoding)
+    const encodedParams = params.map(p => {
+      if (typeof p === 'bigint') {
+        return p.toString(16).padStart(64, '0');
+      } else if (typeof p === 'number') {
+        return p.toString(16).padStart(64, '0');
+      }
+      return p.toString(16).padStart(64, '0');
+    }).join('');
+    
+    return '0x' + selector + encodedParams;
+  };
+
+  const getMethodSelector = (name, inputs) => {
+    // This is simplified - in production, use proper keccak256
+    const signature = name + '(' + inputs.map(i => i.type).join(',') + ')';
+    // For demo purposes, returning hardcoded selectors
+    const selectors = {
+      'balanceOf': '70a08231',
+      'startMining': 'a694fc3a',
+      'completeMining': '7c025200',
+      'claimMiningReward': '6c19e783',
+      'approve': '095ea7b3',
+      'getUserSessions': '5e5f2e26',
+      'getTierInfo': 'c5700a02',
+      'miningDifficulty': '1bc09d0a',
+      'getTotalMiningRewards': 'a7bb5803'
+    };
+    return selectors[name] || '00000000';
+  };
+
+  const waitForTransaction = async (txHash) => {
+    let receipt = null;
+    while (!receipt) {
+      try {
+        receipt = await window.ethereum.request({
+          method: 'eth_getTransactionReceipt',
+          params: [txHash]
+        });
+        if (!receipt) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      } catch (err) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    return receipt;
+  };
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load balance
+      const bal = await contract.balanceOf(account);
+      setBalance(ethers.formatEther(bal));
+      
+      // Load sessions
+      const userSessions = await contract.getUserSessions(account);
+      setSessions(userSessions);
+      
+      // Load tiers
+      const tierData = [];
+      for (let i = 0; i < 3; i++) {
+        const tier = await contract.getTierInfo(i);
+        tierData.push({
+          id: i,
+          duration: Number(tier.duration),
+          multiplier: Number(tier.rewardMultiplier),
+          minStake: ethers.formatEther(tier.minStake),
+          active: tier.active
+        });
+      }
+      setTiers(tierData);
+      
+      // Load difficulty and rewards
+      const diff = await contract.miningDifficulty();
+      setDifficulty(ethers.formatEther(diff));
+      
+      const rewards = await contract.getTotalMiningRewards();
+      setTotalRewards(ethers.formatEther(rewards));
+      
+      setLoading(false);
+    } catch (err) {
+      setError('Failed to load data: ' + err.message);
+      setLoading(false);
+    }
+  };
+
+  const setupEventListeners = () => {
+    contract.on("MiningStarted", (user, sessionId, amount, tier) => {
+      if (user.toLowerCase() === account.toLowerCase()) {
+        loadData();
+      }
+    });
+    
+    contract.on("MiningCompleted", (user, sessionId, amount) => {
+      if (user.toLowerCase() === account.toLowerCase()) {
+        loadData();
+      }
+    });
+    
+    contract.on("RewardClaimed", (user, sessionId, reward) => {
+      if (user.toLowerCase() === account.toLowerCase()) {
+        loadData();
+      }
+    });
+  };
+
+  const startMining = async () => {
+    try {
+      if (!stakeAmount || parseFloat(stakeAmount) <= 0) {
+        setError('Enter valid stake amount');
+        return;
+      }
+      
+      setLoading(true);
+      setError('');
+      
+      const amount = ethers.parseEther(stakeAmount);
+      
+      // Approve first (if needed)
+      const approveTx = await contract.approve(CONTRACT_ADDRESS, amount);
+      await approveTx.wait();
+      
+      const tx = await contract.startMining(amount, selectedTier);
+      await tx.wait();
+      
+      setStakeAmount('');
+      await loadData();
+      setLoading(false);
+    } catch (err) {
+      setError('Mining failed: ' + err.message);
+      setLoading(false);
+    }
+  };
+
+  const completeMining = async (sessionId) => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      const tx = await contract.completeMining(sessionId);
+      await tx.wait();
+      
+      await loadData();
+      setLoading(false);
+    } catch (err) {
+      setError('Complete failed: ' + err.message);
+      setLoading(false);
+    }
+  };
+
+  const claimReward = async (sessionId) => {
+    try {
+      setLoading(true);
+      setError('');
+      
+      const tx = await contract.claimMiningReward(sessionId);
+      await tx.wait();
+      
+      await loadData();
+      setLoading(false);
+    } catch (err) {
+      setError('Claim failed: ' + err.message);
+      setLoading(false);
+    }
+  };
+
+  const withdrawEarly = async (sessionId) => {
+    if (!confirm('Early withdrawal incurs 20% penalty. Continue?')) return;
+    
+    try {
+      setLoading(true);
+      setError('');
+      
+      const tx = await contract.withdrawEarly(sessionId);
+      await tx.wait();
+      
+      await loadData();
+      setLoading(false);
+    } catch (err) {
+      setError('Withdraw failed: ' + err.message);
+      setLoading(false);
+    }
+  };
+
+  const formatDuration = (seconds) => {
+    const days = Math.floor(seconds / 86400);
+    return `${days} days`;
+  };
+
+  const formatDate = (timestamp) => {
+    return new Date(Number(timestamp) * 1000).toLocaleString();
+  };
+
+  const getTimeRemaining = (endTime) => {
+    const now = Math.floor(Date.now() / 1000);
+    const remaining = Number(endTime) - now;
+    
+    if (remaining <= 0) return 'Ready';
+    
+    const days = Math.floor(remaining / 86400);
+    const hours = Math.floor((remaining % 86400) / 3600);
+    return `${days}d ${hours}h`;
+  };
+
+  const getTierName = (tier) => {
+    const names = ['Short-term', 'Medium-term', 'Long-term'];
+    return names[tier] || 'Unknown';
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-800 mb-2">BLAN Mining Dashboard</h1>
+              <p className="text-gray-600">Stake your BLAN tokens and earn rewards</p>
+            </div>
+            <Coins className="w-16 h-16 text-indigo-600" />
+          </div>
+          
+          {/* Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
+              <div className="text-sm opacity-90 mb-1">Your Balance</div>
+              <div className="text-2xl font-bold">{parseFloat(balance).toFixed(2)} BLAN</div>
+            </div>
+            
+            <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white">
+              <div className="text-sm opacity-90 mb-1">Total Rewards</div>
+              <div className="text-2xl font-bold">{parseFloat(totalRewards).toFixed(2)} BLAN</div>
+            </div>
+            
+            <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white">
+              <div className="text-sm opacity-90 mb-1">Active Sessions</div>
+              <div className="text-2xl font-bold">{sessions.filter(s => s.active).length}</div>
+            </div>
+            
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white">
+              <div className="text-sm opacity-90 mb-1">Difficulty</div>
+              <div className="text-2xl font-bold">{parseFloat(difficulty).toFixed(0)}</div>
+            </div>
+          </div>
+          
+          {account && (
+            <div className="mt-4 text-sm text-gray-600">
+              Connected: {account.slice(0, 6)}...{account.slice(-4)}
+            </div>
+          )}
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-start">
+            <AlertCircle className="w-5 h-5 text-red-600 mr-3 flex-shrink-0 mt-0.5" />
+            <div className="text-red-800">{error}</div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Start Mining */}
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-2xl shadow-xl p-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                <TrendingUp className="w-6 h-6 mr-2 text-indigo-600" />
+                Start Mining
+              </h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Stake Amount
+                  </label>
+                  <input
+                    type="number"
+                    value={stakeAmount}
+                    onChange={(e) => setStakeAmount(e.target.value)}
+                    placeholder="0.0"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                  <div className="mt-1 text-sm text-gray-500">
+                    Balance: {parseFloat(balance).toFixed(2)} BLAN
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Mining Tier
+                  </label>
+                  <div className="space-y-2">
+                    {tiers.map((tier) => (
+                      <button
+                        key={tier.id}
+                        onClick={() => setSelectedTier(tier.id)}
+                        className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
+                          selectedTier === tier.id
+                            ? 'border-indigo-600 bg-indigo-50'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="font-semibold text-gray-800">{getTierName(tier.id)}</span>
+                          <span className="text-sm bg-indigo-100 text-indigo-700 px-2 py-1 rounded">
+                            {tier.multiplier / 100}% APY
+                          </span>
+                        </div>
+                        <div className="text-sm text-gray-600 space-y-1">
+                          <div>Duration: {formatDuration(tier.duration)}</div>
+                          <div>Min Stake: {tier.minStake} BLAN</div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                
+                <button
+                  onClick={startMining}
+                  disabled={loading}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Processing...' : 'Start Mining'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Mining Sessions */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-2xl shadow-xl p-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
+                <Award className="w-6 h-6 mr-2 text-indigo-600" />
+                Your Mining Sessions
+              </h2>
+              
+              {sessions.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No mining sessions yet</p>
+                  <p className="text-sm">Start mining to see your sessions here</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {sessions.map((session, index) => {
+                    const isComplete = Date.now() / 1000 > Number(session.endTime);
+                    const canClaim = !session.active && Number(session.rewardClaimed) === 0;
+                    
+                    return (
+                      <div
+                        key={index}
+                        className="border-2 border-gray-200 rounded-xl p-5 hover:border-indigo-300 transition-all"
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <div className="font-semibold text-lg text-gray-800">
+                              Session #{index}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {getTierName(session.tier)}
+                            </div>
+                          </div>
+                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                            session.active
+                              ? 'bg-yellow-100 text-yellow-700'
+                              : Number(session.rewardClaimed) > 0
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {session.active ? 'Active' : Number(session.rewardClaimed) > 0 ? 'Claimed' : 'Complete'}
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
+                          <div>
+                            <div className="text-gray-600">Staked</div>
+                            <div className="font-semibold text-gray-800">
+                              {ethers.formatEther(session.amount)} BLAN
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-600">Time Remaining</div>
+                            <div className="font-semibold text-gray-800">
+                              {getTimeRemaining(session.endTime)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-600">Started</div>
+                            <div className="font-semibold text-gray-800">
+                              {formatDate(session.startTime)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-600">Ends</div>
+                            <div className="font-semibold text-gray-800">
+                              {formatDate(session.endTime)}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {Number(session.rewardClaimed) > 0 && (
+                          <div className="mb-4 p-3 bg-green-50 rounded-lg">
+                            <div className="text-sm text-green-700">
+                              Reward Claimed: {ethers.formatEther(session.rewardClaimed)} BLAN
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex gap-2">
+                          {session.active && isComplete && (
+                            <button
+                              onClick={() => completeMining(index)}
+                              disabled={loading}
+                              className="flex-1 bg-green-600 text-white py-2 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+                            >
+                              Complete Mining
+                            </button>
+                          )}
+                          
+                          {session.active && !isComplete && (
+                            <button
+                              onClick={() => withdrawEarly(index)}
+                              disabled={loading}
+                              className="flex-1 bg-orange-600 text-white py-2 rounded-lg font-medium hover:bg-orange-700 transition-colors disabled:opacity-50"
+                            >
+                              Withdraw Early (-20%)
+                            </button>
+                          )}
+                          
+                          {canClaim && (
+                            <button
+                              onClick={() => claimReward(index)}
+                              disabled={loading}
+                              className="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                            >
+                              Claim Reward
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 text-center text-gray-600 text-sm">
+          <p>BLAN Token Mining • Base Network</p>
+          <p className="mt-1">Contract: {CONTRACT_ADDRESS}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
